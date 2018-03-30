@@ -30,10 +30,10 @@ Revision history:
   Module created.
 
 */
-
+//#include "RegisterDump.h"
 #include "catena4450_PowerReduce.h"
-//#include <delay.h>
 #include "ThisCatena.h"
+//#include <delay.h>
 
 #include <cmath>
 #include <type_traits>
@@ -47,7 +47,6 @@ Revision history:
 |
 \****************************************************************************/
 using namespace McciCatena;
-#define VBATPIN A7
 
 /****************************************************************************\
 |
@@ -104,20 +103,9 @@ Returns:
 */
 void setup() {
 	/* Setting up things */
-
-	delay(1000);  // Delay
-
   gCatena.begin();
-	gCatena4450.begin ();
-
+	gCatena4450.begin();
 	Serial.begin (9600);	
-
-	Serial.println ("Initialized...\n");
-
-	/* Blink LED with a delay */
-	gCatena4450.blinkLed(5, 500);
- 
-	delay(1000);  // Delay
 	}
 
 /*
@@ -160,29 +148,42 @@ void loop() {
 
 	gCatena4450.attachInterrupt(attachCB);
 
-	Serial.end();
+  //regDumpCtrl();
+	//Serial.end();
+ 
+ //gCatena4450.blinkLed(2, 500);
+  //SYSCTRL->OSC8M.bit.ENABLE = 0;
+  //SYSCTRL->DFLLCTRL.bit.ENABLE = 0;
+
+  Serial.println("Going to Standby Mode!...");
+  /* Blink LED with a delay */
+  gCatena4450.blinkLed(5, 500);
 
 	/* Safely detach the USB prior to sleeping */
-	USBDevice.detach();
+	//USBDevice.detach();
 
 	/* Sleep until next alarm match */
 	gCatena4450.standbyMode();
 
 	/* Re-attach the USB, audible sound on windows machines */
-	USBDevice.attach();
+	//USBDevice.attach();
 
 	/* Blink LED indicating awake */
-	gCatena4450.blinkLed(5, 200);
-
-	delay(1000);  // Delay added to make serial more reliable
+	gCatena4450.blinkLed(3, 200);
 
 	Serial.begin(9600);
 	/* Wait till the Serial gets ready */
 	while (! Serial);
 	Serial.println("Awake...");
+	//regDumpCtrl();
 	}
 
 void attachCB(void) // Do something when interrupt called
 	{
-	Serial.println("Attach...");
+    //SYSCTRL->OSC8M.bit.ENABLE = 1;
+    //SYSCTRL->DFLLCTRL.bit.ENABLE = 1;
+
+	//Serial.println("Attach...");
 	}
+
+

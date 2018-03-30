@@ -92,7 +92,7 @@ void Catena4450_PR::begin(bool resetTime) {
 	/* Turn on the digital interface clock */
 	PM->APBAMASK.reg |= PM_APBAMASK_RTC; 
 
-	/* Configuring XOSC32K Clock */
+	/* Configuring OSC32K Clock */
 	config32kOSC();
 
 	bool validTime = false;
@@ -218,14 +218,28 @@ void Catena4450_PR::detachInterrupt()
 
 void Catena4450_PR::standbyMode()
 	{
-	/*
-	|| Entering standby mode when connected
-	|| via the native USB port causes issues.
-	*/
-	SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+  if (4450_SLEEP_MODE)   /* IDLE SLEEP MODE */
+    {
+    uint8_t IdleMode;
+    /*
+     * Making the CPU and AHB stop running to try consuming more power
+     */
+    IdleMode |= 0x2;    /* 0 - Stops CPU; 0x1 - stops CPU & AHB ; 0x2 - stops CPU, AHB & APB */
+    SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+    PM->SLEEP.reg = IdleMode;
+    //PM->AHBMASK.reg &= ~(0x7F);   /* Masking the AHB Clock for various peripheral */
+    //PM->APBBMASK.reg &= ~(0x7F);   /* Masking the APB Clock for various peripheral */
+    }
+  else              /* STANDBY SLEEP MODE */
+    {
+  	/*
+  	|| Entering standby mode when connected
+  	|| via the native USB port causes issues.
+  	*/
+  	SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+    }
 	/*
 	|| Puts the system to sleep waiting for interrupt
-
 	|| Executes a device DSB (Data Synchronization Barrier)
 	|| instruction to ensure all ongoing memory accesses have
 	|| completed, then a WFI (Wait For Interrupt) instruction
@@ -530,11 +544,17 @@ void Catena4450_PR::setY2kEpoch(uint32_t ts)
 
 /* Attach peripheral clock to 32k oscillator */
 void Catena4450_PR::configureClock() {
+
+  /*
+   * Enabling GCLK generator 2 and Division factor
+   */
 	GCLK->GENDIV.reg = GCLK_GENDIV_ID(2)|GCLK_GENDIV_DIV(4);
 
-	while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY)
-	;
+	while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY);
 
+  /*
+   *Configuring Generic clock generator 2 to use OSC32K as input and generate 32KHz 
+   */
 	GCLK->GENCTRL.reg = (GCLK_GENCTRL_GENEN			\
 			| GCLK_GENCTRL_SRC_XOSC32K		\
 			| GCLK_GENCTRL_ID(2)			\
@@ -544,13 +564,15 @@ void Catena4450_PR::configureClock() {
 	while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY)
 	;
 
+  /*
+   * Enabling GCLK for RTC and linking it to Generic clock generator 2 (RTC CLK ID : 0x04)
+   */
 	GCLK->CLKCTRL.reg = (uint32_t)((GCLK_CLKCTRL_CLKEN		\
 				| GCLK_CLKCTRL_GEN_GCLK2		\
 				| (RTC_GCLK_ID << GCLK_CLKCTRL_ID_Pos))	\
 				);
 
-	while (GCLK->STATUS.bit.SYNCBUSY)
-	;
+	while (GCLK->STATUS.bit.SYNCBUSY);
 	}
 
 /*
@@ -560,13 +582,34 @@ void Catena4450_PR::configureClock() {
 /* Configure the 32768Hz Oscillator */
 void Catena4450_PR::config32kOSC() 
 	{
-	SYSCTRL->XOSC32K.reg = (SYSCTRL_XOSC32K_ONDEMAND |	\
-			 SYSCTRL_XOSC32K_RUNSTDBY |		\
-			 SYSCTRL_XOSC32K_EN32K |		\
-			 SYSCTRL_XOSC32K_XTALEN |		\
-			 SYSCTRL_XOSC32K_STARTUP(6) |		\
-			 SYSCTRL_XOSC32K_ENABLE			\
-			 );		
+#if 4450_OSC32K
+  //Enable Internal OSC32K
+	SYSCTRL->OSC32K.reg = (SYSCTRL_OSC32K_ONDEMAND |	\
+			 SYSCTRL_OSC32K_RUNSTDBY |		\
+			 SYSCTRL_OSC32K_EN32K |		\
+			 /*SYSCTRL_OSC32K_XTALEN |		\*/
+			 SYSCTRL_OSC32K_STARTUP(6) |		\
+			 SYSCTRL_OSC32K_ENABLE			\
+			 );
+#elif 4450_XOSC32K
+  //Enable External OSC32K
+  SYSCTRL->XOSC32K.reg = (SYSCTRL_XOSC32K_ONDEMAND |  \
+       SYSCTRL_XOSC32K_RUNSTDBY |    \
+       SYSCTRL_XOSC32K_EN32K |   \
+       SYSCTRL_XOSC32K_XTALEN |    \
+       SYSCTRL_XOSC32K_STARTUP(6) |    \
+       SYSCTRL_XOSC32K_ENABLE      \
+       );
+#elif 4450_XOSC
+  //Enable External OSC32K
+  SYSCTRL->XOSC.reg = (SYSCTRL_XOSC_ONDEMAND |  \
+       SYSCTRL_XOSC_RUNSTDBY |    \
+       /*SYSCTRL_XOSC_EN32K |   \*/
+       SYSCTRL_XOSC_XTALEN |    \
+       SYSCTRL_XOSC_STARTUP(0) |    \
+       SYSCTRL_XOSC_ENABLE      \
+       );
+#endif
 	}
 
 /* Synchronise the CLOCK register for reading */
