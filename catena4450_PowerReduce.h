@@ -35,10 +35,10 @@ Revision history:
 #ifndef CATENA4450_POWERREDUCE_H
 #define CATENA4450_POWERREDUCE_H
 
-#define 4450_SLEEP_MODE  1
-#define 4450_OSC32K      0
-#define 4450_XOSC32K     1
-#define 4450_XOSC        0
+#define CATENA4450_SLEEP_MODE  1
+#define CATENA4450_OSC32K      0
+#define CATENA4450_XOSC32K     1
+#define CATENA4450_XOSC        0
 
 #include "Arduino.h"
 

@@ -218,14 +218,15 @@ void Catena4450_PR::detachInterrupt()
 
 void Catena4450_PR::standbyMode()
 	{
-  if (4450_SLEEP_MODE)   /* IDLE SLEEP MODE */
+  if (CATENA4450_SLEEP_MODE)   /* IDLE SLEEP MODE */
     {
     uint8_t IdleMode;
     /*
      * Making the CPU and AHB stop running to try consuming more power
      */
     IdleMode |= 0x2;    /* 0 - Stops CPU; 0x1 - stops CPU & AHB ; 0x2 - stops CPU, AHB & APB */
-    SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+    //SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+    SCB->SCR |= SCB_SCR_SLEEPDEEP_Pos;
     PM->SLEEP.reg = IdleMode;
     //PM->AHBMASK.reg &= ~(0x7F);   /* Masking the AHB Clock for various peripheral */
     //PM->APBBMASK.reg &= ~(0x7F);   /* Masking the APB Clock for various peripheral */
@@ -582,7 +583,7 @@ void Catena4450_PR::configureClock() {
 /* Configure the 32768Hz Oscillator */
 void Catena4450_PR::config32kOSC() 
 	{
-#if 4450_OSC32K
+#if CATENA4450_OSC32K
   //Enable Internal OSC32K
 	SYSCTRL->OSC32K.reg = (SYSCTRL_OSC32K_ONDEMAND |	\
 			 SYSCTRL_OSC32K_RUNSTDBY |		\
@@ -591,7 +592,7 @@ void Catena4450_PR::config32kOSC()
 			 SYSCTRL_OSC32K_STARTUP(6) |		\
 			 SYSCTRL_OSC32K_ENABLE			\
 			 );
-#elif 4450_XOSC32K
+#elif CATENA4450_XOSC32K
   //Enable External OSC32K
   SYSCTRL->XOSC32K.reg = (SYSCTRL_XOSC32K_ONDEMAND |  \
        SYSCTRL_XOSC32K_RUNSTDBY |    \
@@ -600,8 +601,8 @@ void Catena4450_PR::config32kOSC()
        SYSCTRL_XOSC32K_STARTUP(6) |    \
        SYSCTRL_XOSC32K_ENABLE      \
        );
-#elif 4450_XOSC
-  //Enable External OSC32K
+#elif CATENA4450_XOSC
+  //Enable External XOSC
   SYSCTRL->XOSC.reg = (SYSCTRL_XOSC_ONDEMAND |  \
        SYSCTRL_XOSC_RUNSTDBY |    \
        /*SYSCTRL_XOSC_EN32K |   \*/
