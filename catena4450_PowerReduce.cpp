@@ -92,9 +92,6 @@ void Catena4450_PR::begin(bool resetTime) {
 	/* Turn on the digital interface clock */
 	PM->APBAMASK.reg |= PM_APBAMASK_RTC; 
 
-	/* Configuring OSC32K Clock */
-	config32kOSC();
-
 	bool validTime = false;
 	RTC_MODE2_CLOCK_Type oldTime;
 
@@ -106,9 +103,6 @@ void Catena4450_PR::begin(bool resetTime) {
 			oldTime.reg = RTC->MODE2.CLOCK.reg;
 			}
 		}
-
-	/* Setup clock GCLK2 with OSC32K divided by 32 */
-	configureClock();
 
 	RTCdisable();
 
@@ -164,7 +158,15 @@ void Catena4450_PR::begin(bool resetTime) {
 		}
 	while (RTCisSyncing())
 	;
-	
+
+
+	/* Configuring XOSC32K Clock */
+	config32kOSC(SYSCTRL_XOSC32K);
+	/* Setup clock GCLK2 with XOSC32K divided by 32 */
+	configureClock();
+	/* Setup clock GCLK2 with XOSC32K divided by 32 */
+	configIO();
+
 	_configured = true;
 	}
 
@@ -214,41 +216,6 @@ void Catena4450_PR::attachInterrupt(voidFuncPtr callback)
 void Catena4450_PR::detachInterrupt()
 	{
 	RTC_callBack1 = NULL;
-	}
-
-void Catena4450_PR::standbyMode()
-	{
-  if (CATENA4450_SLEEP_MODE)   /* IDLE SLEEP MODE */
-    {
-    uint8_t IdleMode;
-    /*
-     * Making the CPU and AHB stop running to try consuming more power
-     */
-    IdleMode |= 0x2;    /* 0 - Stops CPU; 0x1 - stops CPU & AHB ; 0x2 - stops CPU, AHB & APB */
-    //SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
-    SCB->SCR |= SCB_SCR_SLEEPDEEP_Pos;
-    PM->SLEEP.reg = IdleMode;
-    //PM->AHBMASK.reg &= ~(0x7F);   /* Masking the AHB Clock for various peripheral */
-    //PM->APBBMASK.reg &= ~(0x7F);   /* Masking the APB Clock for various peripheral */
-    }
-  else              /* STANDBY SLEEP MODE */
-    {
-  	/*
-  	|| Entering standby mode when connected
-  	|| via the native USB port causes issues.
-  	*/
-  	SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
-    }
-	/*
-	|| Puts the system to sleep waiting for interrupt
-	|| Executes a device DSB (Data Synchronization Barrier)
-	|| instruction to ensure all ongoing memory accesses have
-	|| completed, then a WFI (Wait For Interrupt) instruction
-	|| to place the device into the sleep mode specified by
-	|| ref system_set_sleepmode until woken by an interrupt.
-	 */
-	__DSB();	/* Data Synchronization Barrier */
-	__WFI();	/* Wait For Interrupt */
 	}
 
 /*
@@ -543,18 +510,25 @@ void Catena4450_PR::setY2kEpoch(uint32_t ts)
 		}
 	}
 
-/* Attach peripheral clock to 32k oscillator */
+/* Attach peripheral clock to External 32khz oscillator */
 void Catena4450_PR::configureClock() {
 
+	//Serial.println("configureClock");
+  /*
+   * Initializing GCLK selection Id and generator Id flag
+   */
+	_gclk_gen_id = 0;
+	_gclk_selection_id = 0;
   /*
    * Enabling GCLK generator 2 and Division factor
    */
 	GCLK->GENDIV.reg = GCLK_GENDIV_ID(2)|GCLK_GENDIV_DIV(4);
 
 	while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY);
+	
 
   /*
-   *Configuring Generic clock generator 2 to use OSC32K as input and generate 32KHz 
+   *Configuring Generic clock generator 2 to use XOSC32K as input and generate 32KHz 
    */
 	GCLK->GENCTRL.reg = (GCLK_GENCTRL_GENEN			\
 			| GCLK_GENCTRL_SRC_XOSC32K		\
@@ -563,6 +537,7 @@ void Catena4450_PR::configureClock() {
 			);
 
 	while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY)
+	_gclk_gen_id |= 1 << GCLK_CLKCTRL_GEN2;
 	;
 
   /*
@@ -574,6 +549,8 @@ void Catena4450_PR::configureClock() {
 				);
 
 	while (GCLK->STATUS.bit.SYNCBUSY);
+	_gclk_selection_id |= 1 << GCLK_CLKCTRL_RTC;
+	//Serial.println("configureClock done");
 	}
 
 /*
@@ -581,36 +558,494 @@ void Catena4450_PR::configureClock() {
 */
 
 /* Configure the 32768Hz Oscillator */
-void Catena4450_PR::config32kOSC() 
+void Catena4450_PR::config32kOSC(selectOSC osc) 
 	{
-#if CATENA4450_OSC32K
-  //Enable Internal OSC32K
-	SYSCTRL->OSC32K.reg = (SYSCTRL_OSC32K_ONDEMAND |	\
-			 SYSCTRL_OSC32K_RUNSTDBY |		\
-			 SYSCTRL_OSC32K_EN32K |		\
-			 /*SYSCTRL_OSC32K_XTALEN |		\*/
-			 SYSCTRL_OSC32K_STARTUP(6) |		\
-			 SYSCTRL_OSC32K_ENABLE			\
-			 );
-#elif CATENA4450_XOSC32K
-  //Enable External OSC32K
-  SYSCTRL->XOSC32K.reg = (SYSCTRL_XOSC32K_ONDEMAND |  \
-       SYSCTRL_XOSC32K_RUNSTDBY |    \
-       SYSCTRL_XOSC32K_EN32K |   \
-       SYSCTRL_XOSC32K_XTALEN |    \
-       SYSCTRL_XOSC32K_STARTUP(6) |    \
-       SYSCTRL_XOSC32K_ENABLE      \
-       );
-#elif CATENA4450_XOSC
-  //Enable External XOSC
-  SYSCTRL->XOSC.reg = (SYSCTRL_XOSC_ONDEMAND |  \
-       SYSCTRL_XOSC_RUNSTDBY |    \
-       /*SYSCTRL_XOSC_EN32K |   \*/
-       SYSCTRL_XOSC_XTALEN |    \
-       SYSCTRL_XOSC_STARTUP(0) |    \
-       SYSCTRL_XOSC_ENABLE      \
-       );
+	//Serial.println("config32kOSC");
+	switch (osc)
+		{
+		case SYSCTRL_XOSC:
+			//Serial.println("configured SYSCTRL_XOSC");
+			//Enable External XOSC
+			SYSCTRL->XOSC.reg = (SYSCTRL_XOSC_ONDEMAND |	\
+				SYSCTRL_XOSC_RUNSTDBY |			\
+				SYSCTRL_XOSC_XTALEN |			\
+				SYSCTRL_XOSC_STARTUP(6) |		\
+				SYSCTRL_XOSC_ENABLE			\
+				);
+		break;
+
+		case SYSCTRL_XOSC32K:
+			//Serial.println("configured SYSCTRL_XOSC32K");
+			//Enable External XOSC32K
+			SYSCTRL->XOSC32K.reg = (SYSCTRL_XOSC32K_ONDEMAND |	\
+				SYSCTRL_XOSC32K_RUNSTDBY |			\
+				SYSCTRL_XOSC32K_EN32K |				\
+				SYSCTRL_XOSC32K_XTALEN |			\
+				SYSCTRL_XOSC32K_STARTUP(6) |			\
+				SYSCTRL_XOSC32K_ENABLE				\
+				);
+		break;
+
+		case SYSCTRL_OSC32K:
+			//Enable Internal OSC32K
+			//Serial.println("configured SYSCTRL_OSC32K");
+			SYSCTRL->OSC32K.reg = (SYSCTRL_OSC32K_ONDEMAND |	\
+				 SYSCTRL_OSC32K_RUNSTDBY |			\
+				 SYSCTRL_OSC32K_EN32K |				\
+				 SYSCTRL_OSC32K_STARTUP(6) |			\
+				 SYSCTRL_OSC32K_ENABLE				\
+				 );
+		break;
+
+		default:
+		/* Do Nothing */
+		//Serial.println("configured Nothing!");
+		break;
+		}
+	}
+
+/* Make the IO Pins to low */
+void Catena4450_PR::configIO(void)
+	{
+	Port *PORT;	/* IO pin  */
+	unsigned int Index1, Index2;
+
+	for (Index1 = 0; Index1 < 2; ++Index1)
+		{
+		for (Index2 = 0; Index2 < 2; ++Index2)
+			{
+			PORT->Group[Index1].DIR.reg &= ~(1 << Index2);
+			PORT->Group[Index1].DIRSET.reg |= (1 << Index2);
+			PORT->Group[Index1].OUT.reg &= ~(1 << Index2);
+			
+			PORT->Group[Index1].WRCONFIG.reg |=
+						PORT_WRCONFIG_PINMASK_Msk;
+			PORT->Group[Index1].WRCONFIG.reg |=
+						(PORT_WRCONFIG_PINMASK_Msk
+						| PORT_WRCONFIG_HWSEL);
+			}
+		}
+	}
+
+/* Select the mode of Sleep IDLE or STANDBY */
+void Catena4450_PR::setSleepMode(Sleep_Mode sleep_mode)
+	{
+	
+	//configSysCtrl(DISABLE);
+
+	//configPeripherals(DISABLE);
+
+	switch (sleep_mode)
+		{
+		case SLEEPMODE_IDLE_0:
+		case SLEEPMODE_IDLE_1:
+		case SLEEPMODE_IDLE_2:
+			SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
+    			PM->SLEEP.reg = sleep_mode;
+    		break;
+
+    		case SLEEPMODE_STANDBY:
+    			SCB->SCR |=  SCB_SCR_SLEEPDEEP_Msk;
+    		break;
+
+		default:
+		/* Do Nothing */
+		break;
+		}
+
+	enterSleepMode();
+	}
+
+void Catena4450_PR::enterSleepMode(void)
+	{
+	/*
+	|| Puts the system to sleep waiting for interrupt
+	|| Executes a device DSB (Data Synchronization Barrier)
+	|| instruction to ensure all ongoing memory accesses have
+	|| completed, then a WFI (Wait For Interrupt) instruction
+	|| to place the device into the sleep mode specified by
+	|| ref system_set_sleepmode until woken by an interrupt.
+	 */
+	__DSB();	/* Data Synchronization Barrier */
+	__WFI();	/* Wait For Interrupt */
+	}
+
+void Catena4450_PR::configSysCtrl(BOOL enable)
+	{
+	//Serial.println("configSysCtrl");
+	if (enable)
+		{
+    /* Disabling XOSC */
+    SYSCTRL->XOSC.bit.ENABLE = ~SYSCTRL_XOSC_ENABLE;
+    SYSCTRL->XOSC.bit.RUNSTDBY = ~SYSCTRL_XOSC_RUNSTDBY;
+
+    /* Disabling OSC32K */
+    SYSCTRL->OSC32K.bit.ENABLE = ~SYSCTRL_OSC32K_ENABLE;
+    SYSCTRL->OSC32K.bit.EN32K = ~SYSCTRL_OSC32K_EN32K;
+    SYSCTRL->OSC32K.bit.RUNSTDBY = ~SYSCTRL_OSC32K_RUNSTDBY;
+
+    /* Disabling OSC8M */
+    SYSCTRL->OSC8M.bit.ENABLE = ~SYSCTRL_OSC8M_ENABLE;
+    SYSCTRL->OSC8M.bit.RUNSTDBY = ~SYSCTRL_OSC8M_RUNSTDBY;
+
+    /* Disabling DFLLCTRL */
+    SYSCTRL->DFLLCTRL.bit.ENABLE = ~SYSCTRL_DFLLCTRL_ENABLE;
+    SYSCTRL->DFLLCTRL.bit.RUNSTDBY = ~SYSCTRL_DFLLCTRL_RUNSTDBY;
+
+    /* Disabling BOD33 */
+    SYSCTRL->BOD33.bit.ENABLE = ~SYSCTRL_BOD33_ENABLE;
+    SYSCTRL->BOD33.bit.RUNSTDBY = ~SYSCTRL_BOD33_RUNSTDBY;
+
+    /* Disabling DPLLCTRLA */
+    SYSCTRL->DPLLCTRLA.bit.ENABLE = ~SYSCTRL_DPLLCTRLA_ENABLE;
+    SYSCTRL->DPLLCTRLA.bit.RUNSTDBY = ~SYSCTRL_DPLLCTRLA_RUNSTDBY;
+
+    /* Disabling DPLLCTRLA */
+    SYSCTRL->DPLLCTRLA.bit.ENABLE = ~SYSCTRL_DPLLCTRLA_ENABLE;
+    SYSCTRL->DPLLCTRLA.bit.RUNSTDBY = ~SYSCTRL_DPLLCTRLA_RUNSTDBY;
+#if 0
+		/* Disabling XOSC */
+		SYSCTRL->XOSC.bit.ENABLE &= ~SYSCTRL_XOSC_ENABLE;
+		SYSCTRL->XOSC.bit.RUNSTDBY &= ~SYSCTRL_XOSC_RUNSTDBY;
+
+		/* Disabling OSC32K */
+		SYSCTRL->OSC32K.bit.ENABLE &= ~SYSCTRL_OSC32K_ENABLE;
+		SYSCTRL->OSC32K.bit.EN32K &= ~SYSCTRL_OSC32K_EN32K;
+		SYSCTRL->OSC32K.bit.RUNSTDBY &= ~SYSCTRL_OSC32K_RUNSTDBY;
+
+		/* Disabling OSC8M */
+		SYSCTRL->OSC8M.bit.ENABLE &= ~SYSCTRL_OSC8M_ENABLE;
+		SYSCTRL->OSC8M.bit.RUNSTDBY &= ~SYSCTRL_OSC8M_RUNSTDBY;
+
+		/* Disabling DFLLCTRL */
+		SYSCTRL->DFLLCTRL.bit.ENABLE &= ~SYSCTRL_DFLLCTRL_ENABLE;
+		SYSCTRL->DFLLCTRL.bit.RUNSTDBY &= ~SYSCTRL_DFLLCTRL_RUNSTDBY;
+
+		/* Disabling BOD33 */
+		SYSCTRL->BOD33.bit.ENABLE &= ~SYSCTRL_BOD33_ENABLE;
+		SYSCTRL->BOD33.bit.RUNSTDBY &= ~SYSCTRL_BOD33_RUNSTDBY;
+
+		/* Disabling DPLLCTRLA */
+		SYSCTRL->DPLLCTRLA.bit.ENABLE &= ~SYSCTRL_DPLLCTRLA_ENABLE;
+		SYSCTRL->DPLLCTRLA.bit.RUNSTDBY &= ~SYSCTRL_DPLLCTRLA_RUNSTDBY;
+
+		/* Disabling DPLLCTRLA */
+		SYSCTRL->DPLLCTRLA.bit.ENABLE &= ~SYSCTRL_DPLLCTRLA_ENABLE;
+		SYSCTRL->DPLLCTRLA.bit.RUNSTDBY &= ~SYSCTRL_DPLLCTRLA_RUNSTDBY;
 #endif
+		}
+	else
+		{
+		/* Do Nothing */
+		}
+	//Serial.println("configSysCtrl");
+	}
+
+/* Disable the unused peripherals */
+void Catena4450_PR::configPeripherals(BOOL enable)
+	{
+	//Serial.println("configPeripherals");
+	/* disabling WDT */
+	/*
+	WDT->CTRL.bit.ENABLE = enable;
+	while(WDT->STATUS.bit.SYNCBUSY);
+	*/
+
+	/* disabling EIC */
+	/*
+	EIC->CTRL.bit.ENABLE = enable;
+	while(EIC->STATUS.bit.SYNCBUSY);
+	*/
+
+	/* disabling SERCOMx's */
+	configSERCOM(SERCOM0, enable);
+	configSERCOM(SERCOM1, enable);
+	configSERCOM(SERCOM2, enable);
+	configSERCOM(SERCOM3, enable);
+	configSERCOM(SERCOM4, enable);
+	configSERCOM(SERCOM5, enable);
+
+	/* disabling TCx's */
+	configTC(TC3, enable);
+	configTC(TC4, enable);
+	configTC(TC5, enable);
+	//configTC(TC6, enable);
+	//configTC(TC7, enable);
+
+	/* disabling TCCx's */
+	configTCC(TCC0, enable);
+	configTCC(TCC1, enable);
+	configTCC(TCC2, enable);
+
+	/* disabling ADC */
+	configADC(ADC, enable);
+
+	/* disabling AC */
+	configAC(AC, enable);
+
+	configDAC(DAC, enable);
+
+	configI2S(I2S, enable);
+
+	configUSB(USB, enable);
+
+	configGCLK(enable);
+	
+	configPM(PM, enable);
+	
+	//TCx->COUNT16.CTRLA.bit.ENABLE = 0;
+	//PM->AHBMASK.reg &= ~(0x7F);   /* Masking the AHB Clock for various peripheral */
+	//PM->APBAMASK.reg &= ~(0x51);   /* Masking the APBA Clock for peripherals EIC WDT PAC0 */
+	//PM->APBBMASK.reg &= ~(0x1F);   /* Masking the APB Clock for peripherals DMAC PORT NVMCTRL DSU PAC1 */
+	//PM->APBCMASK.reg &= ~(0x3FFFFD);   /* Masking the APB Clock for peripherals AC1 I2S PTC DAC AC ADC TC TCC SERCOM PAC2 */
+	//Serial.println("configPeripherals done");
+	}
+
+/* Disable the unused SERCOMx's */
+void Catena4450_PR::configSERCOM(Sercom *SERCOM, BOOL enable)
+	{
+	/* disabling SERCOM (USART) */
+	if (!enable && SERCOM->USART.CTRLA.bit.ENABLE == SERCOM_USART_CTRLA_ENABLE)
+		{
+		SERCOM->USART.CTRLA.bit.ENABLE = SERCOM_USART_CTRLA_ENABLE;
+		/*
+		SERCOM->USART.CTRLA.bit.ENABLE =			\
+				enable	? SERCOM_USART_CTRLA_ENABLE	\
+					: ~SERCOM_USART_CTRLA_ENABLE;
+		*/
+		while(SERCOM->USART.SYNCBUSY.bit.ENABLE & 	\
+				SERCOM_USART_SYNCBUSY_ENABLE	\
+				);
+		}
+
+	/* disabling SERCOM (SPI) */
+	if (!enable && SERCOM->SPI.CTRLA.bit.ENABLE == SERCOM_SPI_CTRLA_ENABLE)
+		{
+		SERCOM->SPI.CTRLA.bit.ENABLE = SERCOM_SPI_CTRLA_ENABLE;
+		/*
+		SERCOM->SPI.CTRLA.bit.ENABLE =				\
+				enable	? SERCOM_SPI_CTRLA_ENABLE	\
+					: ~SERCOM_SPI_CTRLA_ENABLE;
+		*/
+		while(SERCOM->SPI.SYNCBUSY.bit.ENABLE & 	\
+				SERCOM_SPI_SYNCBUSY_ENABLE	\
+				);
+		}
+
+	/* disabling SERCOM (I2CM) I2C Master mode */
+	if (!enable && SERCOM->I2CM.CTRLA.bit.ENABLE == SERCOM_I2CM_CTRLA_ENABLE)
+		{
+		SERCOM->I2CM.CTRLA.bit.ENABLE =				\
+				enable 	? SERCOM_I2CM_CTRLA_ENABLE	\
+					: ~SERCOM_I2CM_CTRLA_ENABLE;
+		while(SERCOM->I2CM.SYNCBUSY.bit.ENABLE & 	\
+				SERCOM_I2CM_SYNCBUSY_ENABLE	\
+				);
+		}
+
+	/* disabling SERCOM (I2CM) I2C Slave mode */
+	if (!enable && SERCOM->I2CS.CTRLA.bit.ENABLE == SERCOM_I2CS_CTRLA_ENABLE)
+		{
+		SERCOM->I2CS.CTRLA.bit.ENABLE =				\
+				enable	? SERCOM_I2CS_CTRLA_ENABLE	\
+					: ~SERCOM_I2CS_CTRLA_ENABLE;
+		while(SERCOM->I2CS.SYNCBUSY.bit.ENABLE & 	\
+				SERCOM_I2CS_SYNCBUSY_ENABLE	\
+				);
+		}
+	}
+
+/* Disable the unused TCx's */
+void Catena4450_PR::configTC(Tc *TC, BOOL enable)
+	{
+	/* disabling Timer/Counter (COUNT8, COUNT16, COUNT32) */
+	TC->COUNT8.CTRLA.bit.ENABLE =
+				enable ? TC_CTRLA_ENABLE : ~TC_CTRLA_ENABLE;
+	while(TC->COUNT8.STATUS.bit.SYNCBUSY & TC_STATUS_SYNCBUSY);
+
+	TC->COUNT16.CTRLA.bit.ENABLE =
+				enable ? TC_CTRLA_ENABLE : ~TC_CTRLA_ENABLE;
+	while(TC->COUNT16.STATUS.bit.SYNCBUSY & TC_STATUS_SYNCBUSY);
+
+	TC->COUNT32.CTRLA.bit.ENABLE =
+				enable ? TC_CTRLA_ENABLE : ~TC_CTRLA_ENABLE;
+	while(TC->COUNT32.STATUS.bit.SYNCBUSY & TC_STATUS_SYNCBUSY);
+	}
+
+/* Disable the unused TCCx's */
+void Catena4450_PR::configTCC(Tcc *TCC, BOOL enable)
+	{
+	/* disabling Timer/Counter for Control */
+	TCC->CTRLA.bit.ENABLE = enable ? TCC_CTRLA_ENABLE : ~TCC_CTRLA_ENABLE;
+	while(TCC->SYNCBUSY.bit.ENABLE & TCC_SYNCBUSY_ENABLE);
+	}
+
+/* Disable the ADC (Analog to Digital Comparator) */
+void Catena4450_PR::configADC(Adc *ADCreg, BOOL enable)
+	{
+	/* disabling ADC */
+	ADCreg->CTRLA.bit.ENABLE = enable ? ADC_CTRLA_ENABLE : ~ADC_CTRLA_ENABLE;
+	}
+
+/* Disable the AC (Analog Comparator) */
+void Catena4450_PR::configAC(Ac *ACreg, BOOL enable)
+	{
+	/* disabling AC */
+	ACreg->CTRLA.bit.ENABLE = enable ? AC_CTRLA_ENABLE : ~AC_CTRLA_ENABLE;
+	}
+
+/* Disable the DAC (Digital Analog Comparator) */
+void Catena4450_PR::configDAC(Dac *DACreg, BOOL enable)
+	{
+	/* disabling DAC */
+	DACreg->CTRLA.bit.ENABLE = enable ? DAC_CTRLA_ENABLE : ~DAC_CTRLA_ENABLE;
+	}
+
+/* Disable the I2S (I2C Sound Controller) */
+void Catena4450_PR::configI2S(I2s *I2Sreg, BOOL enable)
+	{
+	/* disabling I2S */
+	I2Sreg->CTRLA.bit.ENABLE = enable ? I2S_CTRLA_ENABLE : ~I2S_CTRLA_ENABLE;
+	}
+
+/* Disable the USB_HOST (USB Host Mode) */
+void Catena4450_PR::configUSB(Usb *USBreg, BOOL enable)
+	{
+	/* disabling USB_HOST */
+	USBreg->HOST.CTRLA.bit.ENABLE = enable ? USB_CTRLA_ENABLE : ~USB_CTRLA_ENABLE;
+	}
+
+/* Disable the GCLK for unused sources (USB Host Mode) */
+void Catena4450_PR::configGCLK(BOOL enable)
+	{
+	/* disabling the unused GCLKs  */
+	uint8_t Index, Index1;
+	for (Index = 0; Index < sizeof (_GCLK_CLKCTRL_GEN_ID); ++Index)
+		{
+		if (! _gclk_gen_id & (1 << Index))
+			{
+			/* 
+			|| disable the GCLKs which have not been enabled
+			*/
+			Index1 = 0;
+			while (Index1 < sizeof (_GCLK_CLKCTRL_SELETION_ID))
+				{
+				if (! _gclk_selection_id & (1 << Index1))
+					{
+					GCLK->CLKCTRL.reg = 
+						(uint32_t)((~GCLK_CLKCTRL_CLKEN)	\
+						| _GCLK_CLKCTRL_GEN_ID[Index]			\
+						| _GCLK_CLKCTRL_SELETION_ID[Index1]		\
+						);
+
+					while (GCLK->STATUS.bit.SYNCBUSY);
+					}
+				++Index1;
+				}
+			}
+		else
+			{
+			/*
+			|| if configured, do nothing and skip to the next GCLK
+			*/
+			continue;
+			}
+		}
+
+	for (Index = 0; Index < sizeof (_GCLK_CLKCTRL_GEN_ID) && (! _gclk_genctrl_id & (1 << Index)); ++Index)
+		{
+		Index1 = 0;
+		while (Index1 < sizeof (_GCLK_CLKCTRL_SELETION_ID))
+			{
+			if (! _gclk_selection_id & (1 << Index1))
+				{
+				/* 
+				|| disable the GCLKs GENCTRL which have not been enabled
+				*/
+				GCLK->GENCTRL.reg = ((~GCLK_GENCTRL_GENEN)		\
+						| _GCLK_CLKCTRL_SELETION_ID[Index1]	\
+						| _GCLK_GENCTRL_GEN_ID[Index]		\
+						| ~GCLK_GENCTRL_DIVSEL			\
+						);
+
+				while (GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY);
+				}
+			++Index1;
+			}
+		}
+	}
+
+/* Disable the Power Manager accessfor unused peripherals */
+void Catena4450_PR::configPM(Pm *PMreg, BOOL enable)
+	{
+	if (!enable)
+		{
+		/* IDLE */
+		PMreg->SLEEP.reg |= PM_SLEEP_IDLE_APB;
+		/* AHBMASK */
+		PMreg->AHBMASK.reg &= ~(PM_AHBMASK_HPB0 | PM_AHBMASK_HPB1 |		\
+					PM_AHBMASK_HPB2 | PM_AHBMASK_DSU |		\
+					PM_AHBMASK_NVMCTRL | PM_AHBMASK_DMAC |		\
+					PM_AHBMASK_USB);
+		/* APBAMASK */
+		//PMreg->APBAMASK.reg 
+		
+		/* APBBMASK */
+		PMreg->APBBMASK.reg &= ~(PM_APBBMASK_PAC1 | PM_APBBMASK_DSU |		\
+					PM_APBBMASK_NVMCTRL | PM_APBBMASK_PORT |	\
+					PM_APBBMASK_DMAC | PM_APBBMASK_USB |		\
+					PM_APBBMASK_HMATRIX);
+		/* APBCMASK */
+		PMreg->APBCMASK.reg &= ~(PM_APBCMASK_PAC2 | PM_APBCMASK_EVSYS |		\
+					PM_APBCMASK_SERCOM0 |				\
+					PM_APBCMASK_SERCOM1 |				\
+					PM_APBCMASK_SERCOM2 |				\
+					PM_APBCMASK_SERCOM3 |				\
+					PM_APBCMASK_SERCOM4 |				\
+					PM_APBCMASK_SERCOM5 |				\
+					PM_APBCMASK_TCC0 | PM_APBCMASK_TCC1 |		\
+					PM_APBCMASK_TCC2 | PM_APBCMASK_TC3 |		\
+					PM_APBCMASK_TC4 | PM_APBCMASK_TC5 |		\
+					PM_APBCMASK_TC6 | PM_APBCMASK_TC7 |		\
+					PM_APBCMASK_ADC | PM_APBCMASK_AC |		\
+					PM_APBCMASK_DAC | PM_APBCMASK_PTC |		\
+					PM_APBCMASK_I2S);
+		}
+	else
+		{
+		/* IDLE */
+		PMreg->SLEEP.reg &= ~PM_SLEEP_IDLE_APB;
+		/* AHBMASK */
+		PMreg->AHBMASK.reg |= (PM_AHBMASK_HPB0 | PM_AHBMASK_HPB1 |		\
+					PM_AHBMASK_HPB2 | PM_AHBMASK_DSU |		\
+					PM_AHBMASK_NVMCTRL | PM_AHBMASK_DMAC |		\
+					PM_AHBMASK_USB);
+		/* APBAMASK */
+		//PMreg->APBAMASK.reg 
+		
+		/* APBBMASK */
+		PMreg->APBBMASK.reg |= (PM_APBBMASK_PAC1 | PM_APBBMASK_DSU |		\
+					PM_APBBMASK_NVMCTRL | PM_APBBMASK_PORT |	\
+					PM_APBBMASK_DMAC | PM_APBBMASK_USB |		\
+					PM_APBBMASK_HMATRIX);
+
+		/* APBCMASK */
+		PMreg->APBCMASK.reg |= (PM_APBCMASK_PAC2 | PM_APBCMASK_EVSYS |		\
+					PM_APBCMASK_SERCOM0 |				\
+					PM_APBCMASK_SERCOM1 |				\
+					PM_APBCMASK_SERCOM2 |				\
+					PM_APBCMASK_SERCOM3 |				\
+					PM_APBCMASK_SERCOM4 |				\
+					PM_APBCMASK_SERCOM5 |				\
+					PM_APBCMASK_TCC0 | PM_APBCMASK_TCC1 |		\
+					PM_APBCMASK_TCC2 | PM_APBCMASK_TC3 |		\
+					PM_APBCMASK_TC4 | PM_APBCMASK_TC5 |		\
+					PM_APBCMASK_TC6 | PM_APBCMASK_TC7 |		\
+					PM_APBCMASK_ADC | PM_APBCMASK_AC |		\
+					PM_APBCMASK_DAC | PM_APBCMASK_PTC |		\
+					PM_APBCMASK_I2S);
+		}
+	
 	}
 
 /* Synchronise the CLOCK register for reading */

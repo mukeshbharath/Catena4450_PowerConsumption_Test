@@ -30,9 +30,11 @@ Revision history:
   Module created.
 
 */
-//#include "RegisterDump.h"
+
 #include "catena4450_PowerReduce.h"
+#include "RegisterDump.h"
 #include "ThisCatena.h"
+
 //#include <delay.h>
 
 #include <cmath>
@@ -103,9 +105,12 @@ Returns:
 */
 void setup() {
 	/* Setting up things */
-  gCatena.begin();
+	gCatena.begin();
 	gCatena4450.begin();
-	Serial.begin (9600);	
+	/* Reg Dump */
+	//Serial.println("Reg Dumping before config:");
+	//regDumpCtrl();
+  	//gCatena4450.blinkLed(5, 500);
 	}
 
 /*
@@ -133,57 +138,43 @@ Returns:
 */
 
 void loop() {
-
+#if 1
 	/* Adds 10 seconds to alarm time */
 	AlarmTime = gCatena4450.getSeconds() + 10;
 	/* checks for roll over 60 seconds and corrects */
 	AlarmTime = AlarmTime % 60;
-	Serial.print("Next Alarm Time:");
-	Serial.println(AlarmTime);
 
 	/* Wakes at next alarm time */
 	gCatena4450.setAlarmSeconds(AlarmTime);
+
 	/* Match seconds only */
 	gCatena4450.enableAlarm(gCatena4450.MATCH_SS);
 
 	gCatena4450.attachInterrupt(attachCB);
-
-  //regDumpCtrl();
-	//Serial.end();
- 
- //gCatena4450.blinkLed(2, 500);
-  //SYSCTRL->OSC8M.bit.ENABLE = 0;
-  //SYSCTRL->DFLLCTRL.bit.ENABLE = 0;
-
-  Serial.println("Going to Standby Mode!...");
-  /* Blink LED with a delay */
-  gCatena4450.blinkLed(5, 500);
-
+#endif
+	/* Blink LED with a delay */
+	gCatena4450.blinkLed(5, 500);
+#if 1
 	/* Safely detach the USB prior to sleeping */
-	//USBDevice.detach();
+	USBDevice.detach();
 
 	/* Sleep until next alarm match */
-	gCatena4450.standbyMode();
+	gCatena4450.setSleepMode(gCatena4450.SLEEPMODE_STANDBY);
+
+	/* Reg Dump */
+	//Serial.println("Reg Dumping after sleep:");
+	//regDumpCtrl();
 
 	/* Re-attach the USB, audible sound on windows machines */
-	//USBDevice.attach();
-
+	USBDevice.attach();
+#endif
 	/* Blink LED indicating awake */
 	gCatena4450.blinkLed(3, 200);
-
-	Serial.begin(9600);
-	/* Wait till the Serial gets ready */
-	while (! Serial);
-	Serial.println("Awake...");
-	//regDumpCtrl();
 	}
 
 void attachCB(void) // Do something when interrupt called
 	{
-    //SYSCTRL->OSC8M.bit.ENABLE = 1;
-    //SYSCTRL->DFLLCTRL.bit.ENABLE = 1;
-
-	//Serial.println("Attach...");
+	
 	}
 
 
