@@ -3,9 +3,7 @@ Hi Mukesh,
 
 One, you should not worry about normal mode. We *only* care about deep sleep. 
 
-I’m pretty sure that you’re not getting into STANDBY mode. Here is the chart from the datasheet page 792:
-
- 
+I’m pretty sure that you’re not getting into STANDBY mode. There is a chart from the datasheet page 792.
 
 Your description looks as if you’re going between one of the various IDLE modes. Furthermore, IDLE mode should consume about 1 to 2ma *more* than STANDBY mode.  So if there’s a static current draw on the board other than the CPU, you should still be adjusting relative to the baseline by more than we’re seeing.
 
